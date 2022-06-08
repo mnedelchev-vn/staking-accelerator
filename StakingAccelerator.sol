@@ -169,19 +169,19 @@ interface DentacoinToken {
 interface ISwapRouter {
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 
-struct ExactInputSingleParams {
-address tokenIn;
-address tokenOut;
-uint24 fee;
-address recipient;
-uint256 amountIn;
-uint256 amountOutMinimum;
-uint160 sqrtPriceLimitX96;
-}
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
 }
 
 interface StakingProgram {
-function whitelistedStake(uint256 _tokens_amount, address _staker) external;
+    function whitelistedStake(uint256 _tokens_amount, address _staker) external;
 }
 
 // MN bby ¯\_(ツ)_/¯
