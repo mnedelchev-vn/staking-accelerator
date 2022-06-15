@@ -84,23 +84,35 @@ contract SafeMath {
 }
 
 contract StakingAccelerator is Ownable, SafeMath {
+    uint256 public incentivePercentage = 5;
+
     // DentacoinToken Instance
-    address public dcn_address = 0x1da650C3B2DaA8AA9Ff6F661d4156Ce24d08A062;
-    DentacoinToken TokenContract = DentacoinToken(dcn_address);
+    address public token_address;
+    DentacoinToken TokenContract;
 
     // SwapRouter Instance
-    ISwapRouter SwapRouter = ISwapRouter(0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45);
+    ISwapRouter SwapRouter;
 
     // StakingProgram Instance
-    address public staking_address = 0x32424581364eD499489D25cb9dF17E35B591bC14;
-    StakingProgram StakingContract = StakingProgram(staking_address);
+    StakingProgram StakingContract;
 
-    uint24 public uniSwapFee = 3000;
-    uint256 public incentivePercentage = 5;
+    // Quoter instance
+    IQuoter Quoter;
+
     bool public contractStopped = false;
+    uint16 public slippage = 20;
+    uint24 public uniswapFee = 3000;
+    address public tokenIn;
 
-    constructor() payable {
-        TokenContract.approve(staking_address, 8000000000000);
+    constructor(address _token_address, address _tokenIn, address _swap_router_address, address _staking_address, address _quoter_address) payable {
+        token_address = _token_address;
+        tokenIn = _tokenIn;
+        TokenContract = DentacoinToken(_token_address);
+        SwapRouter = ISwapRouter(_swap_router_address);
+        StakingContract = StakingProgram(_staking_address);
+        Quoter = IQuoter(_quoter_address);
+
+        TokenContract.approve(_staking_address, 115792089237316195423570985008687907853269984665640564039457584007913129639935);
     }
 
     // ==================================== EVENTS ====================================
@@ -123,8 +135,11 @@ contract StakingAccelerator is Ownable, SafeMath {
         }
     }
 
-    function setContractParams(uint24 _uniSwapFee, uint256 _incentivePercentage) external onlyOwner {
-        uniSwapFee = _uniSwapFee;
+    function setContractParams(uint24 _uniswapFee, uint16 _slippage, uint256 _incentivePercentage) external onlyOwner {
+        require(_slippage < 100, "ERROR: slippage is not valid.");
+
+        uniswapFee = _uniswapFee;
+        slippage = _slippage;
         incentivePercentage = _incentivePercentage;
     }
     // ==================================== /CONTRACT ADMIN ====================================
@@ -132,14 +147,18 @@ contract StakingAccelerator is Ownable, SafeMath {
     // ===================================== CONTRACT BODY =====================================
     function buyAndStake() external payable checkIfContractStopped {
         require(msg.value > 0, "ERROR: Not enough ETH.");
-        require(msg.sender != address(0), "ERROR: Invalid msg.sender.");
 
         if (incentivePercentage > 0) {
-            require(TokenContract.balanceOf(address(this)) > 0, "ERROR: not enought DCN balance.");
+            require(TokenContract.balanceOf(address(this)) > 0, "ERROR: not enough token balance.");
         }
 
-        // UniSwap purchase
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({tokenIn: 0x4200000000000000000000000000000000000006, tokenOut: dcn_address, fee: uniSwapFee, recipient: address(this), amountIn: msg.value, amountOutMinimum: 0, sqrtPriceLimitX96: 0});
+        // calculate Uniswap amountOutMinimum to prevent sandwich attack
+        uint256 quoteAmountOut = Quoter.quoteExactInputSingle(tokenIn, token_address, uniswapFee, msg.value, 0);
+        require(quoteAmountOut > 0, "ERROR: failed predicting uniswap trade outcome.");
+        uint256 amountOutMinimum = div(mul(quoteAmountOut, sub(100, slippage)), 100);
+
+        // Uniswap purchase
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({tokenIn: tokenIn, tokenOut: token_address, fee: uniswapFee, recipient: address(this), amountIn: msg.value, amountOutMinimum: amountOutMinimum, sqrtPriceLimitX96: 0});
         uint256 amountOut = SwapRouter.exactInputSingle{value: msg.value}(params);
 
         // Add incentive to the buyers amount
@@ -178,6 +197,16 @@ interface ISwapRouter {
         uint256 amountOutMinimum;
         uint160 sqrtPriceLimitX96;
     }
+}
+
+interface IQuoter {
+    function quoteExactInputSingle(
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint256 amountIn,
+        uint160 sqrtPriceLimitX96
+    ) external returns (uint256 amountOut);
 }
 
 interface StakingProgram {
